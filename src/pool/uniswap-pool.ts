@@ -4,7 +4,7 @@ import { Web3 } from 'web3';
 import { erc20Abi, poolAbi, quoterAbi } from '../abis';
 import { MintTransactionBuilder } from './mint-transaction-builder';
 import { MulticallPlugin } from 'web3-plugin-multicall';
-import { UniswapConfig, uniswapConfigsByChainId } from '../config';
+import { UniswapConfig, uniswapConfigByChainId } from '../config';
 import { PositionManager } from '../positions/position-manager';
 import { getTokens } from '../core/utils';
 
@@ -30,7 +30,7 @@ export class UniswapPool {
     const chainId = Number(await web3.eth.getChainId());
 
     if (!config) {
-      config = uniswapConfigsByChainId[Number(chainId)];
+      config = uniswapConfigByChainId[Number(chainId)];
 
       if (!config) {
         throw new Error(`Uniswap config for chainId ${chainId} not found. Please, specify it manually`);
@@ -60,7 +60,7 @@ export class UniswapPool {
     const chainId = Number(await web3.eth.getChainId());
 
     if (!config) {
-      config = uniswapConfigsByChainId[Number(chainId)];
+      config = uniswapConfigByChainId[Number(chainId)];
 
       if (!config) {
         throw new Error(`Uniswap config for chainId ${chainId} not found. Please, specify it manually`);

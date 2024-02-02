@@ -22,7 +22,7 @@ const mainAddresses: UniswapConfig = {
 };
 
 // TODO: add all chains
-export const uniswapConfigsByChainId: Record<number, UniswapConfig> = {
+export const uniswapConfigByChainId: Record<number, UniswapConfig> = {
   1: mainAddresses,
   5: mainAddresses,
   10: mainAddresses,

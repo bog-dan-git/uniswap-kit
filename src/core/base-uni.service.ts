@@ -1,4 +1,4 @@
-import { UniswapConfig, uniswapConfigsByChainId } from '../config';
+import { UniswapConfig, uniswapConfigByChainId } from '../config';
 import { Web3 } from 'web3';
 import { MulticallPlugin } from 'web3-plugin-multicall';
 
@@ -17,7 +17,7 @@ export class BaseUniService {
 
     const web3 = new Web3(rpcUrl);
     const chain = await web3.eth.getChainId();
-    const configByChain = uniswapConfigsByChainId[Number(chain)];
+    const configByChain = uniswapConfigByChainId[Number(chain)];
 
     if (!configByChain) {
       throw new Error(`Uniswap config for chainId ${chain} not found. Please, specify it manually`);
