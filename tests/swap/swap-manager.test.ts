@@ -50,7 +50,7 @@ describe('Swap manager tests', () => {
     const chainId = await web3.eth.getChainId();
     const config = uniswapConfigByChainId[Number(chainId)];
 
-    await resetAllowance(TOKEN0_ADDRESS, config.deploymentAddresses.swapRouter02);
+    await setAllowance(TOKEN0_ADDRESS, config.deploymentAddresses.swapRouter02, 0n);
 
     const [token0BalanceBefore, token1BalanceBefore] = await getBalances();
     const amountIn = 10n ** 6n;
@@ -77,6 +77,65 @@ describe('Swap manager tests', () => {
     expect(token1BalanceAfter).toBeGreaterThan(token1BalanceBefore);
   });
 
+  it('Should swap exact output', async () => {
+    const chainId = await web3.eth.getChainId();
+    const config = uniswapConfigByChainId[Number(chainId)];
+
+    await setAllowance(TOKEN0_ADDRESS, config.deploymentAddresses.swapRouter02, 10n ** 20n);
+    const [token0BalanceBefore, token1BalanceBefore] = await getBalances();
+    const amountOut = 10n ** 6n;
+
+    const transaction = await swapManager.swapExactOutput({
+      tokenInAddress: TOKEN0_ADDRESS,
+      tokenOutAddress: TOKEN1_ADDRESS,
+      amountOut,
+      recipient: WALLET_ADDRESS,
+    });
+
+    const txReceipt = await transaction.execute({
+      rpcUrl: RPC_URL,
+      privateKey: WALLET_KEY,
+      gas: 3_000_000n,
+    });
+
+    await transactionMining(RPC_URL, txReceipt.transactionHash.toString());
+
+    const [token0BalanceAfter, token1BalanceAfter] = await getBalances();
+
+    expect(token0BalanceAfter).toBeLessThan(token0BalanceBefore);
+
+    expect(BigInt(token1BalanceAfter)).toEqual(token1BalanceBefore + amountOut);
+  });
+
+  it('Should ensure allowance for exact output', async () => {
+    const chainId = await web3.eth.getChainId();
+    const config = uniswapConfigByChainId[Number(chainId)];
+
+    await setAllowance(TOKEN0_ADDRESS, config.deploymentAddresses.swapRouter02, 0n);
+
+    const [token0BalanceBefore, token1BalanceBefore] = await getBalances();
+    const amountOut = 10n ** 6n;
+
+    const transaction = await swapManager.swapExactOutput({
+      tokenInAddress: TOKEN0_ADDRESS,
+      tokenOutAddress: TOKEN1_ADDRESS,
+      amountOut,
+      ensureAllowance: true,
+      recipient: WALLET_ADDRESS,
+    });
+
+    await transaction.execute({
+      rpcUrl: RPC_URL,
+      privateKey: WALLET_KEY,
+    });
+
+    const [token0BalanceAfter, token1BalanceAfter] = await getBalances();
+
+    expect(token0BalanceAfter).toBeLessThan(token0BalanceBefore);
+
+    expect(BigInt(token1BalanceAfter)).toEqual(token1BalanceBefore + amountOut);
+  });
+
   const getBalances = async (): Promise<[bigint, bigint]> => {
     const [token0Balance, token1Balance] = await web3.multicall.makeMulticall([
       token0Contract.methods.balanceOf(WALLET_ADDRESS),
@@ -86,8 +145,8 @@ describe('Swap manager tests', () => {
     return [BigInt(token0Balance), BigInt(token1Balance)];
   };
 
-  const resetAllowance = async (token: string, spender: string) => {
-    const encodedAbi = token0Contract.methods.approve(spender, 0).encodeABI();
+  const setAllowance = async (token: string, spender: string, amount: bigint) => {
+    const encodedAbi = token0Contract.methods.approve(spender, amount).encodeABI();
     const tx = new Transaction(encodedAbi, '0x0', token);
     const txReceipt = await tx.execute({
       rpcUrl: RPC_URL,

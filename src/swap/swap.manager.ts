@@ -2,7 +2,6 @@ import { Percent } from '../core/models/percent';
 import { Percent as UniPercent, TradeType } from '@uniswap/sdk-core';
 import { ethers } from 'ethers';
 import { Web3 } from 'web3';
-import { MulticallPlugin } from 'web3-plugin-multicall';
 import { AlphaRouter, CurrencyAmount, SwapOptionsSwapRouter02, SwapType } from '@uniswap/smart-order-router';
 import { getTokens } from '../core/utils';
 import { erc20Abi } from '../abis';
@@ -13,14 +12,21 @@ import { MultistepTransaction, Transaction } from '../transaction';
 interface CreateSwapTransactionParams {
   tokenInAddress: string;
   tokenOutAddress: string;
-  amountIn: bigint;
   recipient: string;
   slippage?: Percent;
   deadline?: Date;
   ensureAllowance?: boolean;
 }
 
-type SwapExactInputReturnType<T extends CreateSwapTransactionParams> = T extends {
+interface CreateSwapExactInputTransactionParams extends CreateSwapTransactionParams {
+  amountIn: bigint;
+}
+
+interface CreateSwapExactOutputTransactionParams extends CreateSwapTransactionParams {
+  amountOut: bigint;
+}
+
+type SwapReturnType<T extends CreateSwapTransactionParams> = T extends {
   ensureAllowance: true;
 }
   ? MultistepTransaction
@@ -40,13 +46,12 @@ export class SwapManager extends BaseUniService {
     return new SwapManager(rpcUrl, config);
   }
 
-  public async swapExactInput<T extends CreateSwapTransactionParams>(params: T): Promise<SwapExactInputReturnType<T>> {
+  public async swapExactInput<T extends CreateSwapExactInputTransactionParams>(params: T): Promise<SwapReturnType<T>> {
     const { tokenInAddress, tokenOutAddress, amountIn, slippage, deadline, ensureAllowance, recipient } =
       this.validateParams(params);
     const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
-    const web3 = new Web3(this.rpcUrl);
-    web3.registerPlugin(new MulticallPlugin());
-    const chainId = Number(await web3.eth.getChainId());
+
+    const chainId = await provider.getNetwork().then((x) => x.chainId);
     const [tokenIn, tokenOut] = await getTokens(this.rpcUrl, [tokenInAddress, tokenOutAddress]);
     const router = new AlphaRouter({
       chainId,
@@ -76,6 +81,7 @@ export class SwapManager extends BaseUniService {
     const transactions: Transaction[] = [];
 
     if (ensureAllowance) {
+      const web3 = new Web3(this.rpcUrl);
       const erc20 = new web3.eth.Contract(erc20Abi, tokenInAddress);
       const allowance = await erc20.methods.allowance(recipient, this.config.deploymentAddresses.swapRouter02).call();
       if (BigInt(allowance) < amountIn) {
@@ -88,12 +94,64 @@ export class SwapManager extends BaseUniService {
 
     transactions.push(new Transaction(calldata, '0x0', this.config.deploymentAddresses.swapRouter02));
 
-    return (
-      params.ensureAllowance ? new MultistepTransaction(transactions) : transactions[0]
-    ) as SwapExactInputReturnType<T>;
+    return (params.ensureAllowance ? new MultistepTransaction(transactions) : transactions[0]) as SwapReturnType<T>;
   }
 
-  private validateParams(params: CreateSwapTransactionParams) {
+  public async swapExactOutput<T extends CreateSwapExactOutputTransactionParams>(
+    params: T,
+  ): Promise<SwapReturnType<T>> {
+    const { tokenInAddress, tokenOutAddress, amountOut, slippage, deadline, ensureAllowance, recipient } =
+      this.validateParams(params);
+    const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+
+    const chainId = await provider.getNetwork().then((x) => x.chainId);
+    const [tokenIn, tokenOut] = await getTokens(this.rpcUrl, [tokenInAddress, tokenOutAddress]);
+    const router = new AlphaRouter({
+      chainId,
+      provider,
+    });
+
+    const options: SwapOptionsSwapRouter02 = {
+      recipient,
+      slippageTolerance: new UniPercent(slippage.numerator, slippage.denominator),
+      deadline: deadline!.getTime(),
+      type: SwapType.SWAP_ROUTER_02,
+    };
+
+    const route = await router.route(
+      CurrencyAmount.fromRawAmount(tokenOut, amountOut.toString()),
+      tokenIn,
+      TradeType.EXACT_OUTPUT,
+      options,
+    );
+
+    if (!route?.route || !route?.methodParameters) {
+      throw new Error('No route found');
+    }
+
+    const { calldata } = route.methodParameters;
+
+    const transactions: Transaction[] = [];
+
+    if (ensureAllowance) {
+      const web3 = new Web3(this.rpcUrl);
+      const erc20 = new web3.eth.Contract(erc20Abi, tokenInAddress);
+      const amountToApprove = BigInt(route.quote.numerator.toString()) / BigInt(route.quote.denominator.toString());
+      const allowance = await erc20.methods.allowance(recipient, this.config.deploymentAddresses.swapRouter02).call();
+      if (BigInt(allowance) < amountOut) {
+        const approveCalldata = erc20.methods
+          .approve(this.config.deploymentAddresses.swapRouter02, amountToApprove)
+          .encodeABI();
+        transactions.push(new Transaction(approveCalldata, '0x0', tokenInAddress));
+      }
+    }
+
+    transactions.push(new Transaction(calldata, '0x0', this.config.deploymentAddresses.swapRouter02));
+
+    return (params.ensureAllowance ? new MultistepTransaction(transactions) : transactions[0]) as SwapReturnType<T>;
+  }
+
+  private validateParams<T extends CreateSwapTransactionParams>(params: T) {
     if (!params.tokenInAddress) {
       throw new Error('Token in address not specified');
     }
