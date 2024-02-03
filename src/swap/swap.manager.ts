@@ -49,50 +49,30 @@ export class SwapManager extends BaseUniService {
   public async swapExactInput<T extends CreateSwapExactInputTransactionParams>(params: T): Promise<SwapReturnType<T>> {
     const { tokenInAddress, tokenOutAddress, amountIn, slippage, deadline, ensureAllowance, recipient } =
       this.validateParams(params);
-    const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
 
-    const chainId = await provider.getNetwork().then((x) => x.chainId);
-    const [tokenIn, tokenOut] = await getTokens(this.rpcUrl, [tokenInAddress, tokenOutAddress]);
-    const router = new AlphaRouter({
-      chainId,
-      provider,
-    });
-
-    const options: SwapOptionsSwapRouter02 = {
+    const route = await this.getRoute(
+      tokenInAddress,
+      tokenOutAddress,
       recipient,
-      slippageTolerance: new UniPercent(slippage.numerator, slippage.denominator),
-      deadline: deadline!.getTime(),
-      type: SwapType.SWAP_ROUTER_02,
-    };
-
-    const route = await router.route(
-      CurrencyAmount.fromRawAmount(tokenIn, amountIn.toString()),
-      tokenOut,
+      slippage,
+      deadline,
+      amountIn,
       TradeType.EXACT_INPUT,
-      options,
     );
 
-    if (!route?.route || !route?.methodParameters) {
-      throw new Error('No route found');
-    }
-
-    const { calldata } = route.methodParameters;
+    const { methodParameters } = route;
 
     const transactions: Transaction[] = [];
 
     if (ensureAllowance) {
-      const web3 = new Web3(this.rpcUrl);
-      const erc20 = new web3.eth.Contract(erc20Abi, tokenInAddress);
-      const allowance = await erc20.methods.allowance(recipient, this.config.deploymentAddresses.swapRouter02).call();
-      if (BigInt(allowance) < amountIn) {
-        const approveCalldata = erc20.methods
-          .approve(this.config.deploymentAddresses.swapRouter02, amountIn.toString())
-          .encodeABI();
-        transactions.push(new Transaction(approveCalldata, '0x0', tokenInAddress));
+      const allowance = await this.getAllowanceCalldata(tokenInAddress, recipient, amountIn);
+
+      if (allowance) {
+        transactions.push(new Transaction(allowance, '0x0', tokenInAddress));
       }
     }
 
-    transactions.push(new Transaction(calldata, '0x0', this.config.deploymentAddresses.swapRouter02));
+    transactions.push(new Transaction(methodParameters!.calldata, '0x0', this.config.deploymentAddresses.swapRouter02));
 
     return (params.ensureAllowance ? new MultistepTransaction(transactions) : transactions[0]) as SwapReturnType<T>;
   }
@@ -102,14 +82,70 @@ export class SwapManager extends BaseUniService {
   ): Promise<SwapReturnType<T>> {
     const { tokenInAddress, tokenOutAddress, amountOut, slippage, deadline, ensureAllowance, recipient } =
       this.validateParams(params);
+
+    const { quote, methodParameters } = await this.getRoute(
+      tokenInAddress,
+      tokenOutAddress,
+      recipient,
+      slippage,
+      deadline,
+      amountOut,
+      TradeType.EXACT_OUTPUT,
+    );
+
+    const transactions: Transaction[] = [];
+
+    if (ensureAllowance) {
+      const amountToApprove = BigInt(quote.numerator.toString()) / BigInt(quote.denominator.toString());
+
+      const allowance = await this.getAllowanceCalldata(tokenInAddress, recipient, amountToApprove);
+
+      if (allowance) {
+        transactions.push(new Transaction(allowance, '0x0', tokenInAddress));
+      }
+    }
+
+    transactions.push(new Transaction(methodParameters!.calldata, '0x0', this.config.deploymentAddresses.swapRouter02));
+
+    return (params.ensureAllowance ? new MultistepTransaction(transactions) : transactions[0]) as SwapReturnType<T>;
+  }
+
+  private async getAllowanceCalldata(
+    tokenInAddress: string,
+    recipient: string,
+    amount: bigint,
+  ): Promise<string | undefined> {
+    const web3 = new Web3(this.rpcUrl);
+    const erc20 = new web3.eth.Contract(erc20Abi, tokenInAddress);
+    const allowance = await erc20.methods.allowance(recipient, this.config.deploymentAddresses.swapRouter02).call();
+
+    if (BigInt(allowance) < amount) {
+      const approveCalldata = erc20.methods
+        .approve(this.config.deploymentAddresses.swapRouter02, amount.toString())
+        .encodeABI();
+
+      return approveCalldata;
+    }
+  }
+
+  private async getRoute(
+    tokenInAddress: string,
+    tokenOutAddress: string,
+    recipient: string,
+    slippage: Percent,
+    deadline: Date,
+    amount: bigint,
+    type: TradeType,
+  ) {
     const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
 
     const chainId = await provider.getNetwork().then((x) => x.chainId);
-    const [tokenIn, tokenOut] = await getTokens(this.rpcUrl, [tokenInAddress, tokenOutAddress]);
     const router = new AlphaRouter({
       chainId,
       provider,
     });
+
+    const [tokenIn, tokenOut] = await getTokens(this.rpcUrl, [tokenInAddress, tokenOutAddress]);
 
     const options: SwapOptionsSwapRouter02 = {
       recipient,
@@ -118,37 +154,16 @@ export class SwapManager extends BaseUniService {
       type: SwapType.SWAP_ROUTER_02,
     };
 
-    const route = await router.route(
-      CurrencyAmount.fromRawAmount(tokenOut, amountOut.toString()),
-      tokenIn,
-      TradeType.EXACT_OUTPUT,
-      options,
-    );
+    const token0 = type === TradeType.EXACT_INPUT ? tokenIn : tokenOut;
+    const token1 = type === TradeType.EXACT_INPUT ? tokenOut : tokenIn;
 
-    if (!route?.route || !route?.methodParameters) {
+    const route = await router.route(CurrencyAmount.fromRawAmount(token0, amount.toString()), token1, type, options);
+
+    if (!route || !route?.route || !route?.methodParameters) {
       throw new Error('No route found');
     }
 
-    const { calldata } = route.methodParameters;
-
-    const transactions: Transaction[] = [];
-
-    if (ensureAllowance) {
-      const web3 = new Web3(this.rpcUrl);
-      const erc20 = new web3.eth.Contract(erc20Abi, tokenInAddress);
-      const amountToApprove = BigInt(route.quote.numerator.toString()) / BigInt(route.quote.denominator.toString());
-      const allowance = await erc20.methods.allowance(recipient, this.config.deploymentAddresses.swapRouter02).call();
-      if (BigInt(allowance) < amountOut) {
-        const approveCalldata = erc20.methods
-          .approve(this.config.deploymentAddresses.swapRouter02, amountToApprove)
-          .encodeABI();
-        transactions.push(new Transaction(approveCalldata, '0x0', tokenInAddress));
-      }
-    }
-
-    transactions.push(new Transaction(calldata, '0x0', this.config.deploymentAddresses.swapRouter02));
-
-    return (params.ensureAllowance ? new MultistepTransaction(transactions) : transactions[0]) as SwapReturnType<T>;
+    return route;
   }
 
   private validateParams<T extends CreateSwapTransactionParams>(params: T) {

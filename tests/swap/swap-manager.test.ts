@@ -63,12 +63,10 @@ describe('Swap manager tests', () => {
       recipient: WALLET_ADDRESS,
     });
 
-    const txReceipt = await transaction.execute({
+    await transaction.execute({
       rpcUrl: RPC_URL,
       privateKey: WALLET_KEY,
     });
-
-    console.log(txReceipt);
 
     const [token0BalanceAfter, token1BalanceAfter] = await getBalances();
 
