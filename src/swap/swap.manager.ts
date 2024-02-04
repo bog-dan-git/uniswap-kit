@@ -1,13 +1,11 @@
 import { Percent } from '../core/models/percent';
 import { Percent as UniPercent, TradeType } from '@uniswap/sdk-core';
 import { ethers } from 'ethers';
-import { Web3 } from 'web3';
 import { AlphaRouter, CurrencyAmount, SwapOptionsSwapRouter02, SwapType } from '@uniswap/smart-order-router';
-import { getTokens } from '../core/utils';
-import { erc20Abi } from '../abis';
 import { BaseUniService } from '../core/base-uni.service';
 import { UniswapConfig } from '../config';
 import { MultistepTransaction, Transaction } from '../transaction';
+import { ERC20Facade } from '../erc20';
 
 interface CreateSwapTransactionParams {
   tokenInAddress: string;
@@ -37,6 +35,8 @@ type SwapReturnType<T extends CreateSwapTransactionParams> = T extends {
   : Transaction;
 
 export class SwapManager extends BaseUniService {
+  private readonly erc20Facacde = new ERC20Facade(this.rpcUrl);
+
   public constructor(rpcUrl: string, config: UniswapConfig) {
     super(rpcUrl, config);
   }
@@ -65,10 +65,15 @@ export class SwapManager extends BaseUniService {
     const transactions: Transaction[] = [];
 
     if (ensureAllowance) {
-      const allowance = await this.getAllowanceCalldata(tokenInAddress, recipient, amountIn);
+      const approveTransaction = await this.erc20Facacde.ensureApproved(
+        tokenInAddress,
+        amountIn,
+        recipient,
+        this.config.deploymentAddresses.swapRouter02,
+      );
 
-      if (allowance) {
-        transactions.push(new Transaction(allowance, '0x0', tokenInAddress));
+      if (approveTransaction) {
+        transactions.push(approveTransaction);
       }
     }
 
@@ -98,34 +103,21 @@ export class SwapManager extends BaseUniService {
     if (ensureAllowance) {
       const amountToApprove = BigInt(quote.numerator.toString()) / BigInt(quote.denominator.toString());
 
-      const allowance = await this.getAllowanceCalldata(tokenInAddress, recipient, amountToApprove);
+      const approveTransaction = await this.erc20Facacde.ensureApproved(
+        tokenInAddress,
+        amountToApprove,
+        recipient,
+        this.config.deploymentAddresses.swapRouter02,
+      );
 
-      if (allowance) {
-        transactions.push(new Transaction(allowance, '0x0', tokenInAddress));
+      if (approveTransaction) {
+        transactions.push(approveTransaction);
       }
     }
 
     transactions.push(new Transaction(methodParameters!.calldata, '0x0', this.config.deploymentAddresses.swapRouter02));
 
     return (params.ensureAllowance ? new MultistepTransaction(transactions) : transactions[0]) as SwapReturnType<T>;
-  }
-
-  private async getAllowanceCalldata(
-    tokenInAddress: string,
-    recipient: string,
-    amount: bigint,
-  ): Promise<string | undefined> {
-    const web3 = new Web3(this.rpcUrl);
-    const erc20 = new web3.eth.Contract(erc20Abi, tokenInAddress);
-    const allowance = await erc20.methods.allowance(recipient, this.config.deploymentAddresses.swapRouter02).call();
-
-    if (BigInt(allowance) < amount) {
-      const approveCalldata = erc20.methods
-        .approve(this.config.deploymentAddresses.swapRouter02, amount.toString())
-        .encodeABI();
-
-      return approveCalldata;
-    }
   }
 
   private async getRoute(
@@ -145,7 +137,7 @@ export class SwapManager extends BaseUniService {
       provider,
     });
 
-    const [tokenIn, tokenOut] = await getTokens(this.rpcUrl, [tokenInAddress, tokenOutAddress]);
+    const [tokenIn, tokenOut] = await this.erc20Facacde.getTokens([tokenInAddress, tokenOutAddress]);
 
     const options: SwapOptionsSwapRouter02 = {
       recipient,

@@ -20,9 +20,9 @@ import {
   SwapToRatioStatus,
   SwapType,
 } from '@uniswap/smart-order-router';
-import { getTokens } from '../core/utils';
 import { Transaction } from '../transaction';
 import { ethers } from 'ethers';
+import { ERC20Facade } from '../erc20';
 
 const MAX_UINT128 = '0xffffffffffffffffffffffffffffffff';
 
@@ -53,6 +53,8 @@ export interface PositionInfo {
 }
 
 export class PositionManager extends BaseUniService {
+  private readonly erc20Facade = new ERC20Facade(this.rpcUrl);
+
   private constructor(rpcUrl: string, config: UniswapConfig) {
     super(rpcUrl, config);
   }
@@ -137,7 +139,7 @@ export class PositionManager extends BaseUniService {
       provider: new ethers.providers.JsonRpcProvider(this.rpcUrl),
     });
 
-    const [token0, token1] = await getTokens(this.rpcUrl, [positionInfo.token0, positionInfo.token1]);
+    const [token0, token1] = await this.erc20Facade.getTokens([positionInfo.token0, positionInfo.token1]);
 
     const token0CurrencyAmount = CurrencyAmount.fromRawAmount(token0, params.token0Amount.toString());
     const token1CurrencyAmount = CurrencyAmount.fromRawAmount(token1, params.token1Amount.toString());
@@ -217,7 +219,7 @@ export class PositionManager extends BaseUniService {
     }
 
     const { fee0, fee1 } = await this.getFees(positionOrTokenId.tokenId);
-    const [token0, token1] = await getTokens(this.rpcUrl, [positionOrTokenId.token0, positionOrTokenId.token1]);
+    const [token0, token1] = await this.erc20Facade.getTokens([positionOrTokenId.token0, positionOrTokenId.token1]);
 
     const removeLiquidityOptions: RemoveLiquidityOptions = {
       deadline: deadline ? deadline.getTime() / 1000 : Math.floor(Date.now() / 1000 + 60 * 20),

@@ -1,9 +1,9 @@
 import { SwapManager } from '../../src/swap/swap.manager';
-import { RPC_URL, TOKEN0_ADDRESS, TOKEN1_ADDRESS, WALLET_ADDRESS, WALLET_KEY } from '../pool/utils';
+import { RPC_URL, TOKEN0_ADDRESS, TOKEN1_ADDRESS, WALLET_ADDRESS, WALLET_KEY } from '../utils';
 import { MulticallPlugin } from 'web3-plugin-multicall';
 import { Web3 } from 'web3';
 import { erc20Abi } from '../../src/abis';
-import { transactionMining } from '../pool/utils/web3';
+import { transactionMining } from '../utils/web3';
 import { Transaction } from '../../src/transaction';
 import { uniswapConfigByChainId } from '../../src/config';
 

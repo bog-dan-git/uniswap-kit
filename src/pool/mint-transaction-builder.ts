@@ -1,7 +1,7 @@
 import { UniswapPool } from './uniswap-pool';
 import { MintOptions, nearestUsableTick, NonfungiblePositionManager, Pool, Position } from '@uniswap/v3-sdk';
 import { priceToTick, sqrt96ToPrice } from './helpers';
-import { Transaction } from '../transaction';
+import { MultistepTransaction, Transaction, TransactionResult } from '../transaction';
 import { Percent as UniPercent } from '@uniswap/sdk-core';
 import { Percent } from '../core/models/percent';
 
@@ -10,7 +10,7 @@ interface BuildTransactionParams {
   deadline?: Date;
 }
 
-export class MintTransactionBuilder {
+export class MintTransactionBuilder<T extends TransactionResult> {
   private amount0: bigint | undefined;
   private amount1: bigint | undefined;
 
@@ -78,11 +78,13 @@ export class MintTransactionBuilder {
    * Verifies ERC20 allowance for both tokens.
    * If allowance is not enough, it will be increased to the required value
    */
-  public async verifyAllowance() {
+  public verifyAllowance() {
     this.shouldVerifyAllowance = true;
+
+    return this as MintTransactionBuilder<MultistepTransaction>;
   }
 
-  public async buildTransaction({ recipient, deadline }: BuildTransactionParams) {
+  public async buildTransaction({ recipient, deadline }: BuildTransactionParams): Promise<T> {
     if (!this.amount0 && !this.amount1) {
       throw new Error('Amounts are not set for mint transaction');
     }
@@ -115,7 +117,7 @@ export class MintTransactionBuilder {
 
     const { calldata, value } = NonfungiblePositionManager.addCallParameters(position, mintOptions);
 
-    return new Transaction(calldata, value, this.pool.config.deploymentAddresses.nonFungiblePositionManager);
+    return new Transaction(calldata, value, this.pool.config.deploymentAddresses.nonFungiblePositionManager) as T;
   }
 
   private async getTicks(pool: Pool) {

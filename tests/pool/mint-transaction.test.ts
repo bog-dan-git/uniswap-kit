@@ -1,8 +1,8 @@
-import { UniswapPool } from '../../../src/pool/uniswap-pool';
+import { UniswapPool } from '../../src/pool/uniswap-pool';
 import { FeeAmount } from '@uniswap/v3-sdk';
 import { RPC_URL, WALLET_ADDRESS, WALLET_KEY, TOKEN0_ADDRESS, TOKEN1_ADDRESS } from '../utils';
 import { transactionMining } from '../utils/web3';
-import { PositionManager } from '../../../src/positions/position-manager';
+import { PositionManager } from '../../src/positions/position-manager';
 
 describe('Mint tests', () => {
   let pool!: UniswapPool;

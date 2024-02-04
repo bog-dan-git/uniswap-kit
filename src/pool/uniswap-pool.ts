@@ -1,12 +1,13 @@
 import { computePoolAddress, FeeAmount, Pool } from '@uniswap/v3-sdk';
 import { Price, Token } from '@uniswap/sdk-core';
 import { Web3 } from 'web3';
-import { erc20Abi, poolAbi, quoterAbi } from '../abis';
+import { poolAbi, quoterAbi } from '../abis';
 import { MintTransactionBuilder } from './mint-transaction-builder';
 import { MulticallPlugin } from 'web3-plugin-multicall';
 import { UniswapConfig, uniswapConfigByChainId } from '../config';
 import { PositionManager } from '../positions/position-manager';
-import { getTokens } from '../core/utils';
+import { Transaction } from '../transaction';
+import { ERC20Facade } from '../erc20';
 
 interface CreatePoolFromTokensParams {
   token1Address: string;
@@ -15,6 +16,8 @@ interface CreatePoolFromTokensParams {
 }
 
 export class UniswapPool {
+  private readonly erc20Facade = new ERC20Facade(this.rpcUrl);
+
   private constructor(
     private readonly rpcUrl: string,
     private readonly address: string,
@@ -45,7 +48,9 @@ export class UniswapPool {
       pool.methods.fee(),
     ]);
 
-    const [token0, token1] = await getTokens(rpcUrl, [token0Address, token1Address]);
+    const erc20Facade = new ERC20Facade(rpcUrl);
+
+    const [token0, token1] = await erc20Facade.getTokens([token0Address, token1Address]);
 
     return new UniswapPool(rpcUrl, address, config, token0, token1, Number(fee));
   }
@@ -67,27 +72,16 @@ export class UniswapPool {
       }
     }
 
-    const tokenAContract = new web3.eth.Contract(erc20Abi, token1Address);
-    const tokenBContract = new web3.eth.Contract(erc20Abi, token2Address);
-
-    const [tokenADecimals, tokenASymbol, tokenBDecimals, tokenBSymbol] = await web3.multicall.makeMulticall([
-      tokenAContract.methods.decimals(),
-      tokenAContract.methods.symbol(),
-      tokenBContract.methods.decimals(),
-      tokenBContract.methods.symbol(),
-    ]);
-
-    const tokenA = new Token(chainId, token1Address, Number(tokenADecimals), tokenASymbol);
-    const tokenB = new Token(chainId, token2Address, Number(tokenBDecimals), tokenBSymbol);
-
+    const erc20Facade = new ERC20Facade(rpcUrl);
+    const [token0, token1] = await erc20Facade.getTokens([token1Address, token2Address]);
     const address = computePoolAddress({
       factoryAddress: config.deploymentAddresses.uniswapV3Factory,
-      tokenA,
-      tokenB,
+      tokenA: token0,
+      tokenB: token1,
       fee,
     });
 
-    const pool = new UniswapPool(rpcUrl, address, config, tokenA, tokenB, fee);
+    const pool = new UniswapPool(rpcUrl, address, config, token0, token1, fee);
 
     return pool;
   }
@@ -198,26 +192,13 @@ export class UniswapPool {
     const web3 = new Web3(this.rpcUrl);
     web3.registerPlugin(new MulticallPlugin());
 
-    const tokenAContract = new web3.eth.Contract(erc20Abi, token0Address);
-    const tokenBContract = new web3.eth.Contract(erc20Abi, token1Address);
-
-    const [symbol1, symbol2, decimals1, decimals2] = await web3.multicall.makeMulticall([
-      tokenAContract.methods.symbol(),
-      tokenBContract.methods.symbol(),
-      tokenAContract.methods.decimals(),
-      tokenBContract.methods.decimals(),
-    ]);
-
-    const chainId = Number(await web3.eth.getChainId());
-
-    const token0 = new Token(chainId, token0Address, Number(decimals1), symbol1, symbol1);
-    const token1 = new Token(chainId, token1Address, Number(decimals2), symbol2, symbol2);
+    const [token0, token1] = await this.erc20Facade.getTokens([token0Address, token1Address]);
 
     return { tokenA: token0, tokenB: token1 };
   }
 
   public createMintTransaction() {
-    return new MintTransactionBuilder(this);
+    return new MintTransactionBuilder<Transaction>(this);
   }
 
   private async getPoolTokenAddresses() {
