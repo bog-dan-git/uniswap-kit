@@ -2,6 +2,7 @@ import { BaseUniService } from '../core/base-uni.service';
 import { UniswapConfig } from '../config';
 import { nonFungiblePositionManagerAbi, poolAbi } from '../abis';
 import {
+  AddLiquidityOptions,
   ADDRESS_ZERO,
   computePoolAddress,
   FeeAmount,
@@ -10,7 +11,7 @@ import {
   Position,
   RemoveLiquidityOptions,
 } from '@uniswap/v3-sdk';
-import { Fraction, Percent, Token } from '@uniswap/sdk-core';
+import { Fraction, Percent as UniPercent, Token } from '@uniswap/sdk-core';
 import {
   AlphaRouter,
   CurrencyAmount,
@@ -23,33 +24,38 @@ import {
 import { Transaction } from '../transaction';
 import { ethers } from 'ethers';
 import { ERC20Facade } from '../erc20';
+import { Percent } from '../core/models/percent';
+import { DEFAULT_DEADLINE_SECONDS, DEFAULT_SLIPPAGE_TOLERANCE } from '../core/settings';
 
 const MAX_UINT128 = '0xffffffffffffffffffffffffffffffff';
 
-type SwapAndAddParams = {
+export interface PositionInfo {
+  readonly nonce: number;
+  readonly operator: string;
+  readonly token0: string;
+  readonly token1: string;
+  readonly fee: number;
+  readonly tickLower: number;
+  readonly tickUpper: number;
+  readonly liquidity: bigint;
+  readonly feeGrowthInside0LastX128: bigint;
+  readonly feeGrowthInside1LastX128: bigint;
+  readonly tokensOwed0: bigint;
+  readonly tokensOwed1: bigint;
+  readonly tokenId: bigint;
+}
+
+export interface PositionTransactionOptions {
+  slippageTolerance?: Percent;
+  deadline?: Date;
+}
+
+interface SwapAndAddParams extends PositionTransactionOptions {
   token0Amount: bigint;
   token1Amount: bigint;
   address: string;
-  slippageTolerance?: Percent;
-  deadline?: Date;
   ratioErrorTolerance?: Fraction;
   maxIterations?: number;
-};
-
-export interface PositionInfo {
-  nonce: number;
-  operator: string;
-  token0: string;
-  token1: string;
-  fee: number;
-  tickLower: number;
-  tickUpper: number;
-  liquidity: bigint;
-  feeGrowthInside0LastX128: bigint;
-  feeGrowthInside1LastX128: bigint;
-  tokensOwed0: bigint;
-  tokensOwed1: bigint;
-  tokenId: bigint;
 }
 
 export class PositionManager extends BaseUniService {
@@ -125,8 +131,7 @@ export class PositionManager extends BaseUniService {
   }
 
   public async swapAndAddLiquidity(positionInfo: PositionInfo, params: SwapAndAddParams) {
-    const deadline = params.deadline ?? new Date(Date.now() + 60 * 20 * 1000);
-    const slippageTolerance = params.slippageTolerance ?? new Percent(50, 10_000);
+    const { deadline, slippageTolerance } = this.validateOptions(params);
     const ratioErrorTolerance = params.ratioErrorTolerance ?? new Fraction(10, 100);
     const maxIterations = params.maxIterations ?? 6;
 
@@ -162,8 +167,8 @@ export class PositionManager extends BaseUniService {
       swapOptions: {
         type: SwapType.SWAP_ROUTER_02,
         recipient: params.address,
-        slippageTolerance,
-        deadline: deadline.getTime() / 1000,
+        slippageTolerance: new UniPercent(slippageTolerance.numerator, slippageTolerance.denominator),
+        deadline: Math.floor(deadline.getTime() / 1000),
       },
       addLiquidityOptions: {
         tokenId: positionInfo.tokenId.toString(),
@@ -205,27 +210,36 @@ export class PositionManager extends BaseUniService {
     };
   }
 
-  public async closeAndBurnPosition(position: PositionInfo, recipient: string, deadline?: Date): Promise<Transaction>;
+  public async closeAndBurnPosition(
+    position: PositionInfo,
+    recipient: string,
+    transactionOptions?: PositionTransactionOptions,
+  ): Promise<Transaction>;
 
-  public async closeAndBurnPosition(tokenId: bigint, recipient: string, deadline?: Date): Promise<Transaction>;
+  public async closeAndBurnPosition(
+    tokenId: bigint,
+    recipient: string,
+    transactionOptions?: PositionTransactionOptions,
+  ): Promise<Transaction>;
 
   public async closeAndBurnPosition(
     positionOrTokenId: PositionInfo | bigint,
     recipient: string,
-    deadline?: Date,
+    transactionOptions?: PositionTransactionOptions,
   ): Promise<Transaction> {
     if (typeof positionOrTokenId === 'bigint') {
       positionOrTokenId = await this.getPositionByTokenId(positionOrTokenId);
     }
-
     const { fee0, fee1 } = await this.getFees(positionOrTokenId.tokenId);
     const [token0, token1] = await this.erc20Facade.getTokens([positionOrTokenId.token0, positionOrTokenId.token1]);
 
+    const { deadline, slippageTolerance } = this.validateOptions(transactionOptions);
+
     const removeLiquidityOptions: RemoveLiquidityOptions = {
-      deadline: deadline ? deadline.getTime() / 1000 : Math.floor(Date.now() / 1000 + 60 * 20),
+      deadline: Math.floor(deadline.getTime() / 1000),
       tokenId: positionOrTokenId.tokenId.toString(),
-      slippageTolerance: new Percent(50, 10_000),
-      liquidityPercentage: new Percent(1),
+      slippageTolerance: new UniPercent(slippageTolerance.numerator, slippageTolerance.denominator),
+      liquidityPercentage: new UniPercent(1),
       burnToken: true,
       collectOptions: {
         expectedCurrencyOwed0: CurrencyAmount.fromRawAmount(token0, fee0.toString()),
@@ -251,6 +265,49 @@ export class PositionManager extends BaseUniService {
     return new Transaction(calldata, value, this.config.deploymentAddresses.nonFungiblePositionManager);
   }
 
+  public async increaseLiquidity(
+    position: PositionInfo,
+    fractionToAdd: Fraction,
+    options?: PositionTransactionOptions,
+  ): Promise<Transaction> {
+    const [token0, token1] = await this.erc20Facade.getTokens([position.token0, position.token1]);
+
+    const pool = await this.getPool(token0, token1, position.fee);
+
+    const currentPosition = new Position({
+      pool,
+      tickLower: position.tickLower,
+      tickUpper: position.tickUpper,
+      liquidity: position.liquidity.toString(),
+    });
+
+    const { amount0, amount1 } = currentPosition;
+
+    const newAmount0 = amount0.multiply(fractionToAdd);
+    const newAmount1 = amount1.multiply(fractionToAdd);
+
+    const newPosition = Position.fromAmounts({
+      pool,
+      amount0: newAmount0.quotient,
+      amount1: newAmount1.quotient,
+      tickLower: position.tickLower,
+      tickUpper: position.tickUpper,
+      useFullPrecision: true,
+    });
+
+    const { deadline, slippageTolerance } = this.validateOptions(options);
+
+    const addLiquidityOptions: AddLiquidityOptions = {
+      deadline: Math.floor(deadline.getTime() / 1000),
+      slippageTolerance: new UniPercent(slippageTolerance.numerator, slippageTolerance.denominator),
+      tokenId: position.tokenId.toString(),
+    };
+
+    const { calldata, value } = NonfungiblePositionManager.addCallParameters(newPosition, addLiquidityOptions);
+
+    return new Transaction(calldata, value, this.config.deploymentAddresses.nonFungiblePositionManager);
+  }
+
   public async getActivePositions(address: string): Promise<PositionInfo[]> {
     const allPositions = await this.getAllPositions(address);
 
@@ -266,10 +323,12 @@ export class PositionManager extends BaseUniService {
       fee,
     });
     const contract = new web3.eth.Contract(poolAbi, poolAddress);
+
     const [slot0, liquidity] = await web3.multicall.makeMulticall([
       contract.methods.slot0(),
       contract.methods.liquidity(),
     ]);
+
     const pool = new Pool(token0, token1, fee, slot0.sqrtPriceX96.toString(), liquidity.toString(), Number(slot0.tick));
 
     return pool;
@@ -290,5 +349,12 @@ export class PositionManager extends BaseUniService {
     const contract = new web3.eth.Contract(nonFungiblePositionManagerAbi, this.config.deploymentAddresses.swapRouter02);
 
     return { contract, web3 };
+  }
+
+  private validateOptions(options?: PositionTransactionOptions) {
+    const deadline = options?.deadline ?? new Date(Date.now() + DEFAULT_DEADLINE_SECONDS * 1000);
+    const slippageTolerance = options?.slippageTolerance ?? DEFAULT_SLIPPAGE_TOLERANCE;
+
+    return { deadline, slippageTolerance };
   }
 }
