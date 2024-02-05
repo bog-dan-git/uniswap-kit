@@ -67,9 +67,7 @@ export class PositionManager extends BaseUniService {
 
   public static async create(rpcUrl: string, config?: UniswapConfig) {
     config = await super.validateConfig(rpcUrl, config);
-    const positionManager = new PositionManager(rpcUrl, config);
-
-    return positionManager;
+    return new PositionManager(rpcUrl, config);
   }
 
   public async getPositionTokenIds(address: string): Promise<bigint[]> {
@@ -329,9 +327,7 @@ export class PositionManager extends BaseUniService {
       contract.methods.liquidity(),
     ]);
 
-    const pool = new Pool(token0, token1, fee, slot0.sqrtPriceX96.toString(), liquidity.toString(), Number(slot0.tick));
-
-    return pool;
+    return new Pool(token0, token1, fee, slot0.sqrtPriceX96.toString(), liquidity.toString(), Number(slot0.tick));
   }
 
   private getNonFungiblePositionManagerContract() {
