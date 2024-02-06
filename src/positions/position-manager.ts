@@ -48,14 +48,20 @@ export interface PositionInfo {
 export interface PositionTransactionOptions {
   slippageTolerance?: Percent;
   deadline?: Date;
+  recipient?: string;
+  wallet?: string;
 }
 
-interface SwapAndAddParams extends PositionTransactionOptions {
+export interface SwapAndAddTransactionOptions extends PositionTransactionOptions {
   token0Amount: bigint;
   token1Amount: bigint;
   address: string;
   ratioErrorTolerance?: Fraction;
   maxIterations?: number;
+}
+
+export interface RemoveLiquidityTransactionOptions extends PositionTransactionOptions {
+  collectRewards: boolean;
 }
 
 export class PositionManager extends BaseUniService {
@@ -128,11 +134,11 @@ export class PositionManager extends BaseUniService {
     }));
   }
 
-  public async swapAndAddLiquidity(tokenId: bigint, params: SwapAndAddParams): Promise<Transaction>;
-  public async swapAndAddLiquidity(position: PositionInfo, params: SwapAndAddParams): Promise<Transaction>;
+  public async swapAndAddLiquidity(tokenId: bigint, params: SwapAndAddTransactionOptions): Promise<Transaction>;
+  public async swapAndAddLiquidity(position: PositionInfo, params: SwapAndAddTransactionOptions): Promise<Transaction>;
   public async swapAndAddLiquidity(
     positionOrTokenId: bigint | PositionInfo,
-    params: SwapAndAddParams,
+    params: SwapAndAddTransactionOptions,
   ): Promise<Transaction> {
     if (typeof positionOrTokenId === 'bigint') {
       positionOrTokenId = await this.getPositionByTokenId(positionOrTokenId);
@@ -289,7 +295,6 @@ export class PositionManager extends BaseUniService {
     });
 
     const { amount0, amount1 } = currentPosition;
-
     const newAmount0 = amount0.multiply(fractionToAdd);
     const newAmount1 = amount1.multiply(fractionToAdd);
 
@@ -311,6 +316,49 @@ export class PositionManager extends BaseUniService {
     };
 
     const { calldata, value } = NonfungiblePositionManager.addCallParameters(newPosition, addLiquidityOptions);
+
+    return new Transaction(calldata, value, this.config.deploymentAddresses.nonFungiblePositionManager);
+  }
+
+  public async decreaseLiquidity(
+    position: PositionInfo,
+    fractionToRemove: Fraction,
+    options?: RemoveLiquidityTransactionOptions,
+  ): Promise<Transaction> {
+    const { fee0, fee1 } = await this.getFees(position.tokenId);
+    const [token0, token1] = await this.erc20Facade.getTokens([position.token0, position.token1]);
+
+    const { deadline, slippageTolerance, recipient } = this.validateOptions(options);
+    const collectRewards = options?.collectRewards;
+
+    const collectOptions = {
+      expectedCurrencyOwed0: CurrencyAmount.fromRawAmount(token0, collectRewards ? fee0.toString() : '0x0'),
+      expectedCurrencyOwed1: CurrencyAmount.fromRawAmount(token1, collectRewards ? fee1.toString() : '0x0'),
+      recipient,
+    };
+
+    const removeLiquidityOptions: RemoveLiquidityOptions = {
+      deadline: Math.floor(deadline.getTime() / 1000),
+      tokenId: position.tokenId.toString(),
+      slippageTolerance: new UniPercent(slippageTolerance.numerator, slippageTolerance.denominator),
+      liquidityPercentage: new UniPercent(fractionToRemove.numerator, fractionToRemove.denominator),
+      burnToken: false,
+      collectOptions,
+    };
+
+    const pool = await this.getPool(token0, token1, position.fee);
+
+    const params = NonfungiblePositionManager.removeCallParameters(
+      new Position({
+        pool,
+        liquidity: position.liquidity.toString(),
+        tickUpper: position.tickUpper,
+        tickLower: position.tickLower,
+      }),
+      removeLiquidityOptions,
+    );
+
+    const { calldata, value } = params;
 
     return new Transaction(calldata, value, this.config.deploymentAddresses.nonFungiblePositionManager);
   }
@@ -359,7 +407,7 @@ export class PositionManager extends BaseUniService {
   private validateOptions(options?: PositionTransactionOptions) {
     const deadline = options?.deadline ?? new Date(Date.now() + DEFAULT_DEADLINE_SECONDS * 1000);
     const slippageTolerance = options?.slippageTolerance ?? DEFAULT_SLIPPAGE_TOLERANCE;
-
-    return { deadline, slippageTolerance };
+    const recipient = options?.recipient ?? ADDRESS_ZERO;
+    return { ...options, deadline, slippageTolerance, recipient };
   }
 }
