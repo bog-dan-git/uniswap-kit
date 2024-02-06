@@ -128,7 +128,16 @@ export class PositionManager extends BaseUniService {
     }));
   }
 
-  public async swapAndAddLiquidity(positionInfo: PositionInfo, params: SwapAndAddParams) {
+  public async swapAndAddLiquidity(tokenId: bigint, params: SwapAndAddParams): Promise<Transaction>;
+  public async swapAndAddLiquidity(position: PositionInfo, params: SwapAndAddParams): Promise<Transaction>;
+  public async swapAndAddLiquidity(
+    positionOrTokenId: bigint | PositionInfo,
+    params: SwapAndAddParams,
+  ): Promise<Transaction> {
+    if (typeof positionOrTokenId === 'bigint') {
+      positionOrTokenId = await this.getPositionByTokenId(positionOrTokenId);
+    }
+
     const { deadline, slippageTolerance } = this.validateOptions(params);
     const ratioErrorTolerance = params.ratioErrorTolerance ?? new Fraction(10, 100);
     const maxIterations = params.maxIterations ?? 6;
@@ -142,18 +151,18 @@ export class PositionManager extends BaseUniService {
       provider: new ethers.providers.JsonRpcProvider(this.rpcUrl),
     });
 
-    const [token0, token1] = await this.erc20Facade.getTokens([positionInfo.token0, positionInfo.token1]);
+    const [token0, token1] = await this.erc20Facade.getTokens([positionOrTokenId.token0, positionOrTokenId.token1]);
 
     const token0CurrencyAmount = CurrencyAmount.fromRawAmount(token0, params.token0Amount.toString());
     const token1CurrencyAmount = CurrencyAmount.fromRawAmount(token1, params.token1Amount.toString());
 
-    const pool = await this.getPool(token0, token1, positionInfo.fee);
+    const pool = await this.getPool(token0, token1, positionOrTokenId.fee);
 
     const placeholderPosition = new Position({
       pool,
       liquidity: 1,
-      tickLower: positionInfo.tickLower,
-      tickUpper: positionInfo.tickUpper,
+      tickLower: positionOrTokenId.tickLower,
+      tickUpper: positionOrTokenId.tickUpper,
     });
 
     const swapAndAddConfig: SwapAndAddConfig = {
@@ -169,7 +178,7 @@ export class PositionManager extends BaseUniService {
         deadline: Math.floor(deadline.getTime() / 1000),
       },
       addLiquidityOptions: {
-        tokenId: positionInfo.tokenId.toString(),
+        tokenId: positionOrTokenId.tokenId.toString(),
       },
     };
 
