@@ -321,10 +321,24 @@ export class PositionManager extends BaseUniService {
   }
 
   public async decreaseLiquidity(
+    tokenId: bigint,
+    fractionToRemove: Fraction,
+    options?: RemoveLiquidityTransactionOptions,
+  ): Promise<Transaction>;
+  public async decreaseLiquidity(
     position: PositionInfo,
     fractionToRemove: Fraction,
     options?: RemoveLiquidityTransactionOptions,
+  ): Promise<Transaction>;
+  public async decreaseLiquidity(
+    position: bigint | PositionInfo,
+    fractionToRemove: Fraction,
+    options?: RemoveLiquidityTransactionOptions,
   ): Promise<Transaction> {
+    if (typeof position === 'bigint') {
+      position = await this.getPositionByTokenId(position);
+    }
+
     const { fee0, fee1 } = await this.getFees(position.tokenId);
     const [token0, token1] = await this.erc20Facade.getTokens([position.token0, position.token1]);
 
