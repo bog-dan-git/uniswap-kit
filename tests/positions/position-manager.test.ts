@@ -43,6 +43,24 @@ describe('Position manager tests', () => {
     expect(increasedPosition.liquidity).toBeGreaterThan(position.liquidity);
   });
 
+  it('Should decrease liquidity', async () => {
+    const position = await getSamplePosition();
+
+    const decreaseLiquidityTransaction = await positionManager.decreaseLiquidity(position, new Fraction(50, 100));
+
+    const decreaseLiquidityTransactionReceipt = await decreaseLiquidityTransaction.execute({
+      privateKey: WALLET_KEY,
+      rpcUrl: RPC_URL,
+    });
+
+    await transactionMining(RPC_URL, decreaseLiquidityTransactionReceipt.transactionHash.toString());
+
+    const decreasedPosition = await positionManager.getPositionByTokenId(position.tokenId);
+
+    expect(decreasedPosition.liquidity).toBeLessThan(position.liquidity);
+    expect(decreasedPosition.liquidity).toBeGreaterThan(0);
+  });
+
   const getSamplePosition = async () => {
     const existingPositions = await positionManager.getActivePositions(WALLET_ADDRESS);
 
