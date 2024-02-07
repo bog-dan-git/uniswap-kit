@@ -21,13 +21,27 @@ import {
   SwapToRatioStatus,
   SwapType,
 } from '@uniswap/smart-order-router';
-import { Transaction } from '../transaction';
+import { MultistepTransaction, Transaction } from '../transaction';
 import { ethers } from 'ethers';
 import { ERC20Facade } from '../erc20';
 import { Percent } from '../core/models/percent';
 import { DEFAULT_DEADLINE_SECONDS, DEFAULT_SLIPPAGE_TOLERANCE } from '../core/settings';
 
 const MAX_UINT128 = '0xffffffffffffffffffffffffffffffff';
+
+export interface ApprovableTransactionOptions {
+  ensureAllowance?: boolean;
+}
+
+type ApprovableTransactionReturnType<T extends ApprovableTransactionOptions> = T extends {
+  ensureAllowance: infer K;
+}
+  ? K extends true
+    ? MultistepTransaction
+    : K extends false | undefined
+    ? Transaction
+    : MultistepTransaction | Transaction
+  : Transaction;
 
 export interface PositionInfo {
   readonly nonce: number;
@@ -45,14 +59,14 @@ export interface PositionInfo {
   readonly tokenId: bigint;
 }
 
-export interface PositionTransactionOptions {
+export interface PositionTransactionOptions extends ApprovableTransactionOptions {
   slippageTolerance?: Percent;
   deadline?: Date;
   recipient?: string;
-  wallet?: string;
+  address?: string;
 }
 
-export interface SwapAndAddTransactionOptions extends PositionTransactionOptions {
+export interface SwapAndAddTransactionOptions extends PositionTransactionOptions, ApprovableTransactionOptions {
   token0Amount: bigint;
   token1Amount: bigint;
   address: string;
@@ -144,7 +158,7 @@ export class PositionManager extends BaseUniService {
       positionOrTokenId = await this.getPositionByTokenId(positionOrTokenId);
     }
 
-    const { deadline, slippageTolerance } = this.validateOptions(params);
+    const { deadline, slippageTolerance, recipient } = this.validateOptions(params);
     const ratioErrorTolerance = params.ratioErrorTolerance ?? new Fraction(10, 100);
     const maxIterations = params.maxIterations ?? 6;
 
@@ -179,7 +193,7 @@ export class PositionManager extends BaseUniService {
     const swapAndAddOptions: SwapAndAddOptions = {
       swapOptions: {
         type: SwapType.SWAP_ROUTER_02,
-        recipient: params.address,
+        recipient,
         slippageTolerance: new UniPercent(slippageTolerance.numerator, slippageTolerance.denominator),
         deadline: Math.floor(deadline.getTime() / 1000),
       },
@@ -278,11 +292,11 @@ export class PositionManager extends BaseUniService {
     return new Transaction(calldata, value, this.config.deploymentAddresses.nonFungiblePositionManager);
   }
 
-  public async increaseLiquidity(
+  public async increaseLiquidity<T extends PositionTransactionOptions>(
     position: PositionInfo,
     fractionToAdd: Fraction,
-    options?: PositionTransactionOptions,
-  ): Promise<Transaction> {
+    options?: T,
+  ): Promise<ApprovableTransactionReturnType<T>> {
     const [token0, token1] = await this.erc20Facade.getTokens([position.token0, position.token1]);
 
     const pool = await this.getPool(token0, token1, position.fee);
@@ -317,7 +331,54 @@ export class PositionManager extends BaseUniService {
 
     const { calldata, value } = NonfungiblePositionManager.addCallParameters(newPosition, addLiquidityOptions);
 
-    return new Transaction(calldata, value, this.config.deploymentAddresses.nonFungiblePositionManager);
+    const increaseLiquidityTransaction = new Transaction(
+      calldata,
+      value,
+      this.config.deploymentAddresses.nonFungiblePositionManager,
+    );
+
+    const transactions = [];
+
+    if (options?.ensureAllowance) {
+      const diff0 = BigInt(newAmount0.subtract(amount0).quotient.toString());
+      const diff1 = BigInt(newAmount1.subtract(amount1).quotient.toString());
+
+      if (!options.address) {
+        throw new Error('Address is required to ensure allowance');
+      }
+
+      const tx0 = await this.erc20Facade.ensureApproved(
+        token0.address,
+        diff0,
+        options.address,
+        this.config.deploymentAddresses.nonFungiblePositionManager,
+      );
+
+      if (tx0) {
+        transactions.push(tx0);
+      }
+
+      const tx1 = await this.erc20Facade.ensureApproved(
+        token1.address,
+        diff1,
+        options.address,
+        this.config.deploymentAddresses.nonFungiblePositionManager,
+      );
+
+      if (tx1) {
+        transactions.push(tx1);
+      }
+
+      transactions.push(increaseLiquidityTransaction);
+
+      return new MultistepTransaction(transactions) as ApprovableTransactionReturnType<T>;
+    }
+
+    return new Transaction(
+      calldata,
+      value,
+      this.config.deploymentAddresses.nonFungiblePositionManager,
+    ) as ApprovableTransactionReturnType<T>;
   }
 
   public async decreaseLiquidity(
