@@ -78,6 +78,8 @@ export interface RemoveLiquidityTransactionOptions extends PositionTransactionOp
   collectRewards: boolean;
 }
 
+const abs = (x: bigint) => (x < 0n ? -x : x);
+
 export class PositionManager extends BaseUniService {
   private readonly erc20Facade = new ERC20Facade(this.rpcUrl);
 
@@ -349,7 +351,7 @@ export class PositionManager extends BaseUniService {
 
       const tx0 = await this.erc20Facade.ensureApproved(
         token0.address,
-        diff0,
+        abs(diff0),
         options.address,
         this.config.deploymentAddresses.nonFungiblePositionManager,
       );
@@ -360,7 +362,7 @@ export class PositionManager extends BaseUniService {
 
       const tx1 = await this.erc20Facade.ensureApproved(
         token1.address,
-        diff1,
+        abs(diff1),
         options.address,
         this.config.deploymentAddresses.nonFungiblePositionManager,
       );

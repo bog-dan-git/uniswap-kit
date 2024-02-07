@@ -6,6 +6,8 @@ import { UniswapPool } from '../../src/pool/uniswap-pool';
 import { FeeAmount } from '@uniswap/v3-sdk';
 import { transactionMining } from '../utils/web3';
 import { Fraction } from '@uniswap/sdk-core';
+import { ERC20Facade } from '../../src/erc20';
+import { UniswapConfig, uniswapConfigByChainId } from '../../src/config';
 
 describe('Position manager tests', () => {
   const web3 = new Web3(RPC_URL);
@@ -13,6 +15,8 @@ describe('Position manager tests', () => {
 
   let positionManager: PositionManager;
   let uniswapPool: UniswapPool;
+  let erc20Facade: ERC20Facade;
+  let config: UniswapConfig;
 
   beforeAll(async () => {
     positionManager = await PositionManager.create(RPC_URL);
@@ -21,6 +25,9 @@ describe('Position manager tests', () => {
       token2Address: TOKEN1_ADDRESS,
       fee: FeeAmount.MEDIUM,
     });
+    erc20Facade = new ERC20Facade(RPC_URL);
+    const chainId = await web3.eth.getChainId();
+    config = uniswapConfigByChainId[Number(chainId)];
   });
 
   it('Should increase liquidity', async () => {
@@ -41,6 +48,60 @@ describe('Position manager tests', () => {
     console.log(increasedPosition.liquidity);
 
     expect(increasedPosition.liquidity).toBeGreaterThan(position.liquidity);
+  });
+
+  it('Should ensure allowance when increasing liquidity', async () => {
+    const position = await getSamplePosition();
+    const approve0 = await erc20Facade.approve(
+      position.token0,
+      config.deploymentAddresses.nonFungiblePositionManager,
+      0n,
+    );
+    const approve1 = await erc20Facade.approve(
+      position.token1,
+      config.deploymentAddresses.nonFungiblePositionManager,
+      0n,
+    );
+
+    const approve0TransactionReceipt = await approve0.execute({
+      privateKey: WALLET_KEY,
+      rpcUrl: RPC_URL,
+    });
+
+    const approve1TransactionReceipt = await approve1.execute({
+      privateKey: WALLET_KEY,
+      rpcUrl: RPC_URL,
+    });
+
+    await transactionMining(RPC_URL, approve0TransactionReceipt.transactionHash.toString());
+    await transactionMining(RPC_URL, approve1TransactionReceipt.transactionHash.toString());
+
+    const increaseLiquidityTransaction = await positionManager.increaseLiquidity(position, new Fraction(50, 100), {
+      ensureAllowance: true,
+      address: WALLET_ADDRESS,
+    });
+
+    await increaseLiquidityTransaction.execute({
+      rpcUrl: RPC_URL,
+      privateKey: WALLET_KEY,
+    });
+
+    const increasedPosition = await positionManager.getPositionByTokenId(position.tokenId);
+    expect(increasedPosition.liquidity).toBeGreaterThan(position.liquidity);
+
+    const allowance0 = await erc20Facade.allowance(
+      position.token0,
+      WALLET_ADDRESS,
+      config.deploymentAddresses.nonFungiblePositionManager,
+    );
+    const allowance1 = await erc20Facade.allowance(
+      position.token1,
+      WALLET_ADDRESS,
+      config.deploymentAddresses.nonFungiblePositionManager,
+    );
+
+    expect(allowance0).toBe(0n);
+    expect(allowance1).toBe(0n);
   });
 
   it('Should decrease liquidity', async () => {
