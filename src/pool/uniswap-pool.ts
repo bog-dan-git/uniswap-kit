@@ -198,7 +198,7 @@ export class UniswapPool {
   }
 
   public createMintTransaction() {
-    return new MintTransactionBuilder<Transaction>(this);
+    return new MintTransactionBuilder<Transaction>(this, this.erc20Facade);
   }
 
   private async getPoolTokenAddresses() {
