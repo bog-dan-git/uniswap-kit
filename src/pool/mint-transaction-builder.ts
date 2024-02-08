@@ -4,6 +4,7 @@ import { priceToTick, sqrt96ToPrice } from './helpers';
 import { MultistepTransaction, Transaction, TransactionResult } from '../transaction';
 import { Percent as UniPercent } from '@uniswap/sdk-core';
 import { Percent } from '../core/models/percent';
+import { ERC20Facade } from '../erc20';
 
 interface BuildTransactionParams {
   recipient: string;
@@ -25,8 +26,12 @@ export class MintTransactionBuilder<T extends TransactionResult> {
 
   private slippage = { numerator: 1, denominator: 1000 };
   private shouldVerifyAllowance = false;
+  private address: string | undefined;
 
-  public constructor(private readonly pool: UniswapPool) {}
+  public constructor(
+    private readonly pool: UniswapPool,
+    private readonly erc20Facade: ERC20Facade,
+  ) {}
 
   public fromAmount0(amount0: bigint): this {
     this.amount0 = amount0;
@@ -77,8 +82,10 @@ export class MintTransactionBuilder<T extends TransactionResult> {
   /**
    * Verifies ERC20 allowance for both tokens.
    * If allowance is not enough, it will be increased to the required value
+   * @param address - address of the account to verify allowance (the account that will mint the position)
    */
-  public verifyAllowance() {
+  public verifyAllowance(address: string) {
+    this.address = address;
     this.shouldVerifyAllowance = true;
 
     return this as MintTransactionBuilder<MultistepTransaction>;
@@ -105,10 +112,6 @@ export class MintTransactionBuilder<T extends TransactionResult> {
 
     const position = await this.getPosition(pool, ticks);
 
-    if (this.shouldVerifyAllowance) {
-      // TODO: verify allowance
-    }
-
     const mintOptions: MintOptions = {
       recipient: recipient,
       deadline: deadline ? Math.floor(deadline.getTime() / 1000) : Math.floor(Date.now() / 1000 + 60 * 20),
@@ -117,7 +120,52 @@ export class MintTransactionBuilder<T extends TransactionResult> {
 
     const { calldata, value } = NonfungiblePositionManager.addCallParameters(position, mintOptions);
 
-    return new Transaction(calldata, value, this.pool.config.deploymentAddresses.nonFungiblePositionManager) as T;
+    const mintTransaction = new Transaction(
+      calldata,
+      value,
+      this.pool.config.deploymentAddresses.nonFungiblePositionManager,
+    );
+
+    if (this.shouldVerifyAllowance) {
+      const transactions = [];
+
+      const { amount0: amount0CurrencyAmount, amount1: amount1CurrencyAmount } = position;
+
+      const amount0 = BigInt(amount0CurrencyAmount.toString());
+      const amount1 = BigInt(amount1CurrencyAmount.toString());
+
+      if (amount0) {
+        const tx = await this.erc20Facade.ensureApproved(
+          poolTokens.tokenA.address,
+          amount0,
+          this.pool.config.deploymentAddresses.nonFungiblePositionManager,
+          recipient,
+        );
+
+        if (tx) {
+          transactions.push(tx);
+        }
+      }
+
+      if (amount1) {
+        const tx = await this.erc20Facade.ensureApproved(
+          poolTokens.tokenB.address,
+          amount1,
+          this.pool.config.deploymentAddresses.nonFungiblePositionManager,
+          recipient,
+        );
+
+        if (tx) {
+          transactions.push(tx);
+        }
+      }
+
+      transactions.push(mintTransaction);
+
+      return new MultistepTransaction(transactions) as T;
+    }
+
+    return mintTransaction as T;
   }
 
   private async getTicks(pool: Pool) {
