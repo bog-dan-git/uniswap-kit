@@ -131,15 +131,15 @@ export class MintTransactionBuilder<T extends TransactionResult> {
 
       const { amount0: amount0CurrencyAmount, amount1: amount1CurrencyAmount } = position;
 
-      const amount0 = BigInt(amount0CurrencyAmount.toString());
-      const amount1 = BigInt(amount1CurrencyAmount.toString());
+      const amount0 = BigInt(amount0CurrencyAmount.quotient.toString());
+      const amount1 = BigInt(amount1CurrencyAmount.quotient.toString());
 
       if (amount0) {
         const tx = await this.erc20Facade.ensureApproved(
           poolTokens.tokenA.address,
           amount0,
-          this.pool.config.deploymentAddresses.nonFungiblePositionManager,
           recipient,
+          this.pool.config.deploymentAddresses.nonFungiblePositionManager,
         );
 
         if (tx) {
@@ -151,8 +151,8 @@ export class MintTransactionBuilder<T extends TransactionResult> {
         const tx = await this.erc20Facade.ensureApproved(
           poolTokens.tokenB.address,
           amount1,
-          this.pool.config.deploymentAddresses.nonFungiblePositionManager,
           recipient,
+          this.pool.config.deploymentAddresses.nonFungiblePositionManager,
         );
 
         if (tx) {
