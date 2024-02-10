@@ -8,6 +8,7 @@ import { UniswapConfig, uniswapConfigByChainId } from '../config';
 import { PositionManager } from '../positions/position-manager';
 import { Transaction } from '../transaction';
 import { ERC20Facade } from '../erc20';
+import { BaseUniService } from '../core/base-uni.service';
 
 interface CreatePoolFromTokensParams {
   token1Address: string;
@@ -15,17 +16,19 @@ interface CreatePoolFromTokensParams {
   fee: FeeAmount;
 }
 
-export class UniswapPool {
+export class UniswapPool extends BaseUniService {
   private readonly erc20Facade = new ERC20Facade(this.rpcUrl);
 
   private constructor(
-    private readonly rpcUrl: string,
+    rpcUrl: string,
     private readonly address: string,
     public readonly config: UniswapConfig,
     private readonly token0: Token,
     private readonly token1: Token,
     private readonly fee: FeeAmount,
-  ) {}
+  ) {
+    super(rpcUrl, config);
+  }
 
   public static async fromAddress(rpcUrl: string, address: string, config?: UniswapConfig): Promise<UniswapPool> {
     const web3 = new Web3(rpcUrl);
@@ -222,8 +225,8 @@ export class UniswapPool {
     return contract;
   }
 
-  private getWeb3() {
-    const web3 = new Web3(this.rpcUrl);
+  private static getWeb3(rpcUrl: string) {
+    const web3 = new Web3(rpcUrl);
     web3.registerPlugin(new MulticallPlugin());
 
     return web3;
