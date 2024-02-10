@@ -32,6 +32,10 @@ export class Transaction {
     return false;
   }
 
+  public getContractAddress() {
+    return this.contractAddress;
+  }
+
   public getRawTransaction() {
     const { calldata, value } = this;
 
