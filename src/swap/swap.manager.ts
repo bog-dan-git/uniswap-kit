@@ -77,7 +77,7 @@ export class SwapManager extends BaseUniService {
       }
     }
 
-    transactions.push(new Transaction(methodParameters!.calldata, '0x0', this.config.deploymentAddresses.swapRouter02));
+    transactions.push(new Transaction(methodParameters!.calldata, 0n, this.config.deploymentAddresses.swapRouter02));
 
     return (params.ensureAllowance ? new MultistepTransaction(transactions) : transactions[0]) as SwapReturnType<T>;
   }
@@ -115,7 +115,7 @@ export class SwapManager extends BaseUniService {
       }
     }
 
-    transactions.push(new Transaction(methodParameters!.calldata, '0x0', this.config.deploymentAddresses.swapRouter02));
+    transactions.push(new Transaction(methodParameters!.calldata, 0n, this.config.deploymentAddresses.swapRouter02));
 
     return (params.ensureAllowance ? new MultistepTransaction(transactions) : transactions[0]) as SwapReturnType<T>;
   }

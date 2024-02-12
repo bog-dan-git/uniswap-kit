@@ -23,7 +23,7 @@ export interface TransactionExecutionParams {
 export class Transaction {
   constructor(
     private readonly calldata: string,
-    private readonly value: string,
+    private readonly value: bigint,
     private readonly contractAddress: string,
     private readonly rpcUrl?: string,
   ) {}

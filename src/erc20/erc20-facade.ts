@@ -20,7 +20,7 @@ export class ERC20Facade {
     const token = new web3.eth.Contract(erc20Abi, tokenAddress);
     const abi = token.methods.approve(spender, amount.toString()).encodeABI();
 
-    return new Transaction(abi, '0x0', tokenAddress, this.rpcUrl);
+    return new Transaction(abi, 0n, tokenAddress, this.rpcUrl);
   }
 
   public async getTokens(addresses: string[]): Promise<Token[]> {

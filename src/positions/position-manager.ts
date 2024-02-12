@@ -215,7 +215,7 @@ export class PositionManager extends BaseUniService {
     if (routeToRatioResponse.status === SwapToRatioStatus.SUCCESS) {
       const { calldata, value } = routeToRatioResponse.result.methodParameters!;
 
-      return new Transaction(calldata, value, this.config.deploymentAddresses.swapRouter02);
+      return new Transaction(calldata, BigInt(value), this.config.deploymentAddresses.swapRouter02);
     }
 
     throw new Error('Error');
@@ -291,7 +291,7 @@ export class PositionManager extends BaseUniService {
 
     const { calldata, value } = params;
 
-    return new Transaction(calldata, value, this.config.deploymentAddresses.nonFungiblePositionManager);
+    return new Transaction(calldata, BigInt(value), this.config.deploymentAddresses.nonFungiblePositionManager);
   }
 
   public async increaseLiquidity<T extends PositionTransactionOptions>(
@@ -335,7 +335,7 @@ export class PositionManager extends BaseUniService {
 
     const increaseLiquidityTransaction = new Transaction(
       calldata,
-      value,
+      BigInt(value),
       this.config.deploymentAddresses.nonFungiblePositionManager,
     );
 
@@ -378,7 +378,7 @@ export class PositionManager extends BaseUniService {
 
     return new Transaction(
       calldata,
-      value,
+      BigInt(value),
       this.config.deploymentAddresses.nonFungiblePositionManager,
     ) as ApprovableTransactionReturnType<T>;
   }
@@ -437,7 +437,7 @@ export class PositionManager extends BaseUniService {
 
     const { calldata, value } = params;
 
-    return new Transaction(calldata, value, this.config.deploymentAddresses.nonFungiblePositionManager);
+    return new Transaction(calldata, BigInt(value), this.config.deploymentAddresses.nonFungiblePositionManager);
   }
 
   public async getActivePositions(address: string): Promise<PositionInfo[]> {

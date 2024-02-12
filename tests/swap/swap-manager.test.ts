@@ -145,7 +145,7 @@ describe('Swap manager tests', () => {
 
   const setAllowance = async (token: string, spender: string, amount: bigint) => {
     const encodedAbi = token0Contract.methods.approve(spender, amount).encodeABI();
-    const tx = new Transaction(encodedAbi, '0x0', token);
+    const tx = new Transaction(encodedAbi, 0n, token);
     const txReceipt = await tx.execute({
       rpcUrl: RPC_URL,
       privateKey: WALLET_KEY,
