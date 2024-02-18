@@ -122,7 +122,7 @@ export class MintTransactionBuilder<T extends TransactionResult> {
 
     const mintTransaction = new Transaction(
       calldata,
-      value,
+      BigInt(value),
       this.pool.config.deploymentAddresses.nonFungiblePositionManager,
     );
 
