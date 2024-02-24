@@ -1,14 +1,27 @@
 import { UniswapPool } from './uniswap-pool';
-import { MintOptions, nearestUsableTick, NonfungiblePositionManager, Pool, Position } from '@uniswap/v3-sdk';
+import {
+  MintOptions,
+  nearestUsableTick,
+  NonfungiblePositionManager,
+  PermitOptions,
+  Pool,
+  Position,
+} from '@uniswap/v3-sdk';
 import { priceToTick, sqrt96ToPrice } from './helpers';
 import { MultistepTransaction, Transaction, TransactionResult } from '../transaction';
 import { Percent as UniPercent } from '@uniswap/sdk-core';
 import { Percent } from '../core/models/percent';
 import { ERC20Facade } from '../erc20';
+import { DEFAULT_DEADLINE_SECONDS } from '../core/settings';
 
 interface BuildTransactionParams {
   recipient: string;
   deadline?: Date;
+}
+
+interface VerifyAllowanceOptions {
+  token0?: boolean;
+  token1?: boolean;
 }
 
 export class MintTransactionBuilder<T extends TransactionResult> {
@@ -25,8 +38,11 @@ export class MintTransactionBuilder<T extends TransactionResult> {
   private priceUpper: bigint | undefined;
 
   private slippage = { numerator: 1, denominator: 1000 };
-  private shouldVerifyAllowance = false;
+  private verifyAllowanceOptions: VerifyAllowanceOptions | undefined;
   private address: string | undefined;
+
+  private token0Permit: PermitOptions | undefined;
+  private token1Permit: PermitOptions | undefined;
 
   public constructor(
     private readonly pool: UniswapPool,
@@ -83,12 +99,22 @@ export class MintTransactionBuilder<T extends TransactionResult> {
    * Verifies ERC20 allowance for both tokens.
    * If allowance is not enough, it will be increased to the required value
    * @param address - address of the account to verify allowance (the account that will mint the position)
+   * @param options - options for allowance verification. If not set, both tokens will be verified.
+   * **NOTE** If token supports EIP-2612, it will be better to utilize `token0Permit` and `token1Permit` methods
    */
-  public verifyAllowance(address: string) {
+  public verifyAllowance(address: string, options?: VerifyAllowanceOptions) {
     this.address = address;
-    this.shouldVerifyAllowance = true;
+    this.verifyAllowanceOptions = options ?? { token0: true, token1: true };
 
     return this as MintTransactionBuilder<MultistepTransaction>;
+  }
+
+  public withToken0Permit(options: PermitOptions) {
+    this.token0Permit = options;
+  }
+
+  public withToken1Permit(options: PermitOptions) {
+    this.token1Permit = options;
   }
 
   public async buildTransaction({ recipient, deadline }: BuildTransactionParams): Promise<T> {
@@ -114,8 +140,10 @@ export class MintTransactionBuilder<T extends TransactionResult> {
 
     const mintOptions: MintOptions = {
       recipient: recipient,
-      deadline: deadline ? Math.floor(deadline.getTime() / 1000) : Math.floor(Date.now() / 1000 + 60 * 20),
+      deadline: deadline ? Math.floor(deadline.getTime() / 1000) : DEFAULT_DEADLINE_SECONDS,
       slippageTolerance: new UniPercent(this.slippage.numerator, this.slippage.denominator),
+      token0Permit: this.token0Permit,
+      token1Permit: this.token1Permit,
     };
 
     const { calldata, value } = NonfungiblePositionManager.addCallParameters(position, mintOptions);
@@ -126,7 +154,7 @@ export class MintTransactionBuilder<T extends TransactionResult> {
       this.pool.config.deploymentAddresses.nonFungiblePositionManager,
     );
 
-    if (this.shouldVerifyAllowance) {
+    if (this.verifyAllowanceOptions) {
       const transactions = [];
 
       const { amount0: amount0CurrencyAmount, amount1: amount1CurrencyAmount } = position.mintAmounts;
@@ -135,7 +163,7 @@ export class MintTransactionBuilder<T extends TransactionResult> {
       const amount0 = BigInt(amount0CurrencyAmount.toString());
       const amount1 = BigInt(amount1CurrencyAmount.toString());
 
-      if (amount0) {
+      if (amount0 && this.verifyAllowanceOptions.token0) {
         const tx = await this.erc20Facade.ensureApproved(
           token0.address,
           amount0,
@@ -148,7 +176,7 @@ export class MintTransactionBuilder<T extends TransactionResult> {
         }
       }
 
-      if (amount1) {
+      if (amount1 && this.verifyAllowanceOptions.token1) {
         const tx = await this.erc20Facade.ensureApproved(
           token1.address,
           amount1,
