@@ -164,10 +164,14 @@ export class MintTransactionBuilder<T extends TransactionResult> {
       const amount1 = BigInt(amount1CurrencyAmount.toString());
 
       if (amount0 && this.verifyAllowanceOptions.token0) {
+        if (!this.address) {
+          throw new Error('Address is not set for allowance verification');
+        }
+
         const tx = await this.erc20Facade.ensureApproved(
           token0.address,
           amount0,
-          recipient,
+          this.address,
           this.pool.config.deploymentAddresses.nonFungiblePositionManager,
         );
 
@@ -177,10 +181,14 @@ export class MintTransactionBuilder<T extends TransactionResult> {
       }
 
       if (amount1 && this.verifyAllowanceOptions.token1) {
+        if (!this.address) {
+          throw new Error('Address is not set for allowance verification');
+        }
+
         const tx = await this.erc20Facade.ensureApproved(
           token1.address,
           amount1,
-          recipient,
+          this.address,
           this.pool.config.deploymentAddresses.nonFungiblePositionManager,
         );
 

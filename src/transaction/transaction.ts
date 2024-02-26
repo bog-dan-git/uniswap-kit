@@ -15,7 +15,8 @@ export interface TransactionExecutionParams {
   gasPrice?: bigint;
   /**
    * Gas to use for transaction (defaults to web3.eth.estimateGas())
-   * NOTE! If you pass gas, estimateGas() won't be called, so the transaction will be executed regardless of its gas estimation (i.e. it can fail)
+   * NOTE! If you pass it, estimateGas() won't be called, so the revert won't be checked (and the transaction may fail).
+   * Might be useful for debugging purposes.
    */
   gas?: bigint;
 }
@@ -28,10 +29,6 @@ export class Transaction {
     private readonly rpcUrl?: string,
   ) {}
 
-  public isMultistep(): this is Transaction {
-    return false;
-  }
-
   public getContractAddress() {
     return this.contractAddress;
   }
@@ -43,9 +40,10 @@ export class Transaction {
   }
 
   public async execute(params: TransactionExecutionParams) {
-    const { rpcUrl, privateKey, gasPrice } = params;
+    const { privateKey, gasPrice } = params;
+    const rpcUrl = params.rpcUrl || this.rpcUrl;
 
-    if (!rpcUrl) {
+    if (!rpcUrl || !this.rpcUrl) {
       throw new Error('RPC url is required');
     }
 
@@ -70,6 +68,8 @@ export class Transaction {
     const signedTransaction = await account.signTransaction({ ...transactionData, gas, gasPrice: gasPriceToUse });
 
     return web3.eth.sendSignedTransaction(signedTransaction.rawTransaction, DEFAULT_RETURN_FORMAT, {
+      // The revert is already checked during gas price estimation (if gas is not provided).
+      // This allows forcing the transaction by providing gas value manually (for debugging purposes)
       checkRevertBeforeSending: false,
     });
   }
